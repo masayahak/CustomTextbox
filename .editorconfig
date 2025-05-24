@@ -1,0 +1,7 @@
+﻿[*.cs]
+
+# IDE0090: 'new(...)' を使用する
+dotnet_diagnostic.IDE0090.severity = none
+
+# IDE0042: 変数の宣言を分解
+dotnet_diagnostic.IDE0042.severity = none
