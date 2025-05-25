@@ -1,23 +1,20 @@
 ﻿using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Reflection;
 
-namespace CustomTextbox
+namespace CustomTextbox.Contols
 {
     /// <summary>
     /// 基本仕様：
     /// １．フォーカスを受けたときボーダーラインを強調し青い太枠へ変える
     /// ２．フォーカスを失った時にボーダーラインを元に戻す
-    /// ３．フォーカスを受けたとき、文字が入力されていたら全選択する
+    /// ３．×××××××挙動不安定により禁止（フォーカスを受けたとき、文字が入力されていたら全選択する）
     /// ４．エンターキーで次のタブインデックスへ遷移する
-    /// ５．そのテキストボックスの入力値のチェックメソッドを受け取れる。また、文字列の最大長をプロパティに持つ。
+    /// ５．Modelのプロパティのデータアノテーションから、チェック内容を受け取れる。
     /// ６．チェックメソッドや文字列長に違反した場合、フォーカスを失った時にボーダーラインを太い赤色にする
     /// </summary>
-    public class ValidatingTextBox : TextBox
+    public class ValidatingDateTimePicker : DateTimePicker
     {
-        [Category("データ")]
-        [Description("必須項目はTrueにしてください")]
-        [DefaultValue(false)]
-        public bool Required { get; set; } = false;
-        
         [Category("外観")]
         [Description("外枠の通常色です")]
         [DefaultValue(typeof(Color), "Gray")]
@@ -39,18 +36,13 @@ namespace CustomTextbox
 
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public Func<string, (bool isValid, string errorMessage)>? Validator { get; set; }
-
-        [Browsable(false)]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public bool IsValid => _isValid;
+        public bool IsValid { get; private set; } = true;
 
         private bool _hasFocus = false;
-        private bool _isValid = true;
+        private Func<DateTime, (bool isValid, string errorMessage)>? _validator;
 
-        public ValidatingTextBox()
+        public ValidatingDateTimePicker()
         {
-            BorderStyle = BorderStyle.FixedSingle;
         }
 
         protected override void OnEnter(EventArgs e)
@@ -58,11 +50,9 @@ namespace CustomTextbox
             _hasFocus = true;
             Invalidate();
 
-            if (!string.IsNullOrEmpty(this.Text))
-            {
-                // ３．フォーカスを受けたとき、文字が入力されていたら全選択する
-                this.SelectAll(); // 全選択
-            }
+            // ３．フォーカスを受けたとき、文字が入力されていたら全選択する
+            // 全選択（DateTimePickerはキーボードフォーカスで文字選択不可なため SendKeys を使う）
+            //BeginInvoke((System.Windows.Forms.MethodInvoker)(() => SendKeys.SendWait("{HOME}+{END}")));
 
             base.OnEnter(e);
         }
@@ -70,7 +60,7 @@ namespace CustomTextbox
         protected override void OnLeave(EventArgs e)
         {
             _hasFocus = false;
-            _isValid = ValidateInput();
+            IsValid = ValidateInput();
             Invalidate();
             base.OnLeave(e);
         }
@@ -87,6 +77,7 @@ namespace CustomTextbox
             base.OnKeyDown(e);
         }
 
+        // フォーカスあり／なし／エラー状態で外枠の色を変える
         protected override void WndProc(ref Message m)
         {
             base.WndProc(ref m);
@@ -102,41 +93,54 @@ namespace CustomTextbox
                 if (_hasFocus)
                     borderColor = フォーカス色;
                 // ６．チェックメソッドや文字列長に違反した場合、フォーカスを失った時にボーダーラインを太い赤色にする
-                else if (!_isValid)
+                else if (!IsValid)
                     borderColor = エラー色;
 
-                using Pen pen = new Pen(borderColor, 2);
-                Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
+                using Pen pen = new Pen(borderColor, borderColor != 通常色 ? 2 : 1);
+                Rectangle rect = new Rectangle(1, 1, this.Width - 3, this.Height - 3);
                 g.DrawRectangle(pen, rect);
             }
         }
 
+        // ５．Modelのプロパティのデータアノテーションから、チェック内容を受け取れる。
+        public void BindValidationToModelProperty(Type modelType, string propertyName)
+        {
+            var prop = modelType.GetProperty(propertyName);
+            if (prop == null) return;
+
+            // Requiredの有無
+            var required = prop.GetCustomAttribute<RequiredAttribute>();
+
+            // 値の範囲
+            var range = prop.GetCustomAttribute<RangeAttribute>();
+
+            _validator = value =>
+            {
+                if (required != null && value == DateTime.MinValue)
+                    return (false, required.ErrorMessage ?? "日付の入力は必須です");
+
+                if (range != null)
+                {
+                    if (DateTime.TryParse(range.Minimum?.ToString(), out DateTime min) &&
+                        DateTime.TryParse(range.Maximum?.ToString(), out DateTime max))
+                    {
+                        if (value < min || value > max)
+                            return (false, range.ErrorMessage ?? $"日付は {min.ToShortDateString()} ～ {max.ToShortDateString()} の範囲で入力してください。");
+                    }
+                }
+
+                return (true, string.Empty);
+            };
+        }
+
         private bool ValidateInput()
         {
-            // ５．そのテキストボックスの入力値のチェックメソッドを受け取れる。また、文字列の最大長をプロパティに持つ。
-            var errorMessage = string.Empty;
-
-            if (Required && string.IsNullOrWhiteSpace(this.Text))
+            if (_validator != null)
             {
-                errorMessage = "必須入力です。";
-                ErrorProvider?.SetError(this, errorMessage);
-                return false;
-            }
-
-            if (this.Text.Length > MaxLength)
-            {
-                errorMessage = $"最大文字数({MaxLength})を超えています。";
-                ErrorProvider?.SetError(this, errorMessage);
-                return false;
-            }
-
-            if (Validator != null)
-            {
-                var result = Validator(this.Text);
+                var result = _validator(this.Value);
                 if (!result.isValid)
                 {
-                    errorMessage = result.errorMessage;
-                    ErrorProvider?.SetError(this, errorMessage);
+                    ErrorProvider?.SetError(this, result.errorMessage);
                     return false;
                 }
             }
