@@ -70,6 +70,7 @@ namespace CustomTextbox.Contols
 
         internal bool _hasFocus = false;
         private bool _isValid = true;
+        private RequiredAttribute? _requiredAttr;
 
 
         public ValidatingTextBox()
@@ -144,8 +145,9 @@ namespace CustomTextbox.Contols
             if (prop == null) return;
 
             // Requiredの有無
-            var requiredAttr = prop.GetCustomAttribute<RequiredAttribute>();
-            Required = requiredAttr != null;
+            _requiredAttr = prop.GetCustomAttribute<RequiredAttribute>();
+            this.Required = _requiredAttr != null;
+
 
             // 最大長
             var maxLengthAttr = prop.GetCustomAttribute<MaxLengthAttribute>();
@@ -226,9 +228,10 @@ namespace CustomTextbox.Contols
             // ６．そのテキストボックスの入力値のチェックメソッドを受け取れる。また、文字列の最大長をプロパティに持つ。
             var errorMessage = string.Empty;
 
+            // 検証ロジック
             if (Required && string.IsNullOrWhiteSpace(Text))
             {
-                errorMessage = "必須入力です。";
+                errorMessage = _requiredAttr?.ErrorMessage ?? "必須入力です。";
                 ErrorProvider?.SetError(this, errorMessage);
                 return false;
             }
